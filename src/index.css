@@ -1,0 +1,233 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  font-family: Arial, sans-serif;
+  background: #1e1e1e;
+  color: #cccccc;
+}
+
+.ide {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.topbar {
+  height: 45px;
+  background: #181818;
+  display: flex;
+  align-items: center;
+  padding: 0 15px;
+  border-bottom: 1px solid #333;
+}
+
+.logo {
+  font-weight: bold;
+  margin-right: 30px;
+}
+
+.project-name {
+  color: #aaa;
+}
+
+.topbar-right {
+  margin-left: auto;
+  font-size: 13px;
+  color: #6cc644;
+}
+
+.main-area {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.sidebar {
+  width: 240px;
+  background: #181818;
+  border-right: 1px solid #333;
+  padding-top: 10px;
+}
+
+.sidebar-title {
+  font-size: 12px;
+  font-weight: bold;
+  padding: 0 15px 10px;
+  color: #888;
+}
+
+.folder {
+  padding: 5px 15px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.file {
+  padding: 5px 15px;
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.file:hover {
+  background: #2a2d2e;
+}
+
+.nested {
+  padding-left: 30px;
+}
+
+.active-file {
+  background: #37373d;
+  color: white;
+}
+
+.editor-area {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tabs {
+  height: 35px;
+  display: flex;
+  background: #181818;
+  border-bottom: 1px solid #333;
+}
+
+.tab {
+  padding: 9px 18px;
+  font-size: 13px;
+  border-right: 1px solid #333;
+  color: #888;
+}
+
+.tab.active {
+  color: white;
+  background: #1e1e1e;
+}
+
+.editor-container {
+  flex: 1;
+  min-height: 0;
+}
+
+.bottom-panel {
+  height: 32px;
+  background: #181818;
+  border-top: 1px solid #333;
+  display: flex;
+  align-items: center;
+  gap: 25px;
+  padding: 0 15px;
+  font-size: 12px;
+}
+
+.status {
+  margin-left: auto;
+  color: #888;
+}
+.tab {
+  height: 35px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 15px;
+  font-size: 13px;
+  border-right: 1px solid #333;
+  color: #888;
+  cursor: pointer;
+  background: #181818;
+}
+
+.tab.active {
+  color: white;
+  background: #1e1e1e;
+}
+
+.tab:hover {
+  background: #2a2d2e;
+}
+
+.modified {
+  color: #ffffff;
+  font-size: 10px;
+}
+
+.close-tab {
+  border: none;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0;
+  line-height: 1;
+}
+
+.close-tab:hover {
+  color: white;
+}
+
+.explorer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 8px;
+}
+
+.new-file-button {
+  border: none;
+  background: transparent;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.new-file-button:hover {
+  color: white;
+  background: #333;
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.file-row:hover {
+  background: #2a2d2e;
+}
+
+.file-row .file {
+  flex: 1;
+}
+
+.file-actions {
+  display: none;
+  gap: 2px;
+  padding-right: 5px;
+}
+
+.file-row:hover .file-actions {
+  display: flex;
+}
+
+.file-row.active-file {
+  background: #37373d;
+}
+
+.file-row.active-file .file {
+  background: transparent;
+}
