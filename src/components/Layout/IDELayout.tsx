@@ -6,6 +6,15 @@ import {
   type IDEFile,
 } from "../../data/defaultFiles";
 
+import FileSearch from "../FileSearch/FileSearch";
+
+import CommandPalette, {
+  type Command,
+} from "../CommandPalette/CommandPalette";
+
+import FileIcon from "../FileIcon/FileIcon";
+import socket from "../../services/socket";
+
 function getLanguageFromFileName(
   fileName: string
 ): IDEFile["language"] {
@@ -15,10 +24,12 @@ function getLanguageFromFileName(
     ?.toLowerCase();
 
   switch (extension) {
-    case "ts":
     case "tsx":
-    case "js":
     case "jsx":
+      return "typescriptreact";
+
+    case "ts":
+    case "js":
       return "typescript";
 
     case "json":
@@ -47,10 +58,20 @@ function IDELayout() {
   const [modifiedFiles, setModifiedFiles] =
     useState<string[]>([]);
 
+  const [isSearchOpen, setIsSearchOpen] =
+    useState(false);
+
+  const [
+    isCommandPaletteOpen,
+    setIsCommandPaletteOpen,
+  ] = useState(false);
+
   const activeFile = files.find(
     (file) =>
       file.path === activeFilePath
   );
+
+  const workspaceId = "demo-workspace";
 
   // -----------------------------
   // Save
@@ -72,19 +93,48 @@ function IDELayout() {
   };
 
   // -----------------------------
-  // Ctrl + S
+  // Keyboard Shortcuts
   // -----------------------------
 
   useEffect(() => {
     const handleKeyDown = (
       event: KeyboardEvent
     ) => {
+      // Ctrl + S
       if (
         (event.ctrlKey || event.metaKey) &&
         event.key.toLowerCase() === "s"
       ) {
         event.preventDefault();
         handleSave();
+        return;
+      }
+
+      // Ctrl + Shift + P
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        event.shiftKey &&
+        event.key.toLowerCase() === "p"
+      ) {
+        event.preventDefault();
+        setIsCommandPaletteOpen(true);
+        return;
+      }
+
+      // Ctrl + P
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        event.key.toLowerCase() === "p"
+      ) {
+        event.preventDefault();
+        setIsSearchOpen(true);
+        return;
+      }
+
+      // Escape
+      if (event.key === "Escape") {
+        setIsSearchOpen(false);
+        setIsCommandPaletteOpen(false);
       }
     };
 
@@ -100,6 +150,41 @@ function IDELayout() {
       );
     };
   }, [activeFile]);
+
+useEffect(() => {
+  const handleRemoteChange = (data: {
+    filePath: string;
+    content: string;
+  }) => {
+    console.log(
+      "REMOTE CHANGE RECEIVED:",
+      data.filePath
+    );
+
+    setFiles((currentFiles) =>
+      currentFiles.map((file) =>
+        file.path === data.filePath
+          ? {
+              ...file,
+              content: data.content,
+            }
+          : file
+      )
+    );
+  };
+
+  socket.on(
+    "editor-change",
+    handleRemoteChange
+  );
+
+  return () => {
+    socket.off(
+      "editor-change",
+      handleRemoteChange
+    );
+  };
+}, []);
 
   // -----------------------------
   // Create file
@@ -130,6 +215,7 @@ function IDELayout() {
       window.alert(
         "A file with this name already exists."
       );
+
       return;
     }
 
@@ -185,7 +271,9 @@ function IDELayout() {
       );
 
     setFiles(remainingFiles);
-    setOpenFiles(remainingOpenFiles);
+    setOpenFiles(
+      remainingOpenFiles
+    );
 
     setModifiedFiles((current) =>
       current.filter(
@@ -260,6 +348,7 @@ function IDELayout() {
       window.alert(
         "A file with this name already exists."
       );
+
       return;
     }
 
@@ -362,6 +451,7 @@ function IDELayout() {
       setOpenFiles(
         remainingFiles
       );
+
       return;
     }
 
@@ -402,39 +492,142 @@ function IDELayout() {
   // Editor changes
   // -----------------------------
 
-  const handleEditorChange = (
-    value: string | undefined
+ const handleEditorChange = (
+  value: string | undefined
+) => {
+  if (
+    value === undefined ||
+    !activeFile
+  ) {
+    return;
+  }
+
+  // Update local file state
+  setFiles((currentFiles) =>
+    currentFiles.map((file) =>
+      file.path === activeFile.path
+        ? {
+            ...file,
+            content: value,
+          }
+        : file
+    )
+  );
+
+  // Mark file as modified
+  if (
+    !modifiedFiles.includes(
+      activeFile.path
+    )
+  ) {
+    setModifiedFiles((current) => [
+      ...current,
+      activeFile.path,
+    ]);
+  }
+
+  // Send the change to other users
+  socket.emit("editor-change", {
+    workspaceId,
+    filePath: activeFile.path,
+    content: value,
+  });
+};
+
+  // -----------------------------
+  // File Search
+  // -----------------------------
+
+  const handleSearchSelect = (
+    file: IDEFile
   ) => {
-    if (
-      value === undefined ||
-      !activeFile
-    ) {
-      return;
-    }
+    handleFileClick(file);
+    setIsSearchOpen(false);
+  };
 
-    setFiles((currentFiles) =>
-      currentFiles.map((file) =>
-        file.path ===
-        activeFile.path
-          ? {
-              ...file,
-              content: value,
-            }
-          : file
-      )
-    );
+  // -----------------------------
+  // Command Palette
+  // -----------------------------
 
-    if (
-      !modifiedFiles.includes(
-        activeFile.path
-      )
-    ) {
-      setModifiedFiles(
-        (current) => [
-          ...current,
-          activeFile.path,
-        ]
-      );
+  const commands: Command[] = [
+    {
+      id: "new-file",
+      label: "New File",
+      shortcut: "Ctrl + N",
+    },
+    {
+      id: "save-file",
+      label: "Save File",
+      shortcut: "Ctrl + S",
+    },
+    {
+      id: "rename-file",
+      label: "Rename File",
+    },
+    {
+      id: "delete-file",
+      label: "Delete File",
+    },
+    {
+      id: "close-tab",
+      label: "Close Active Tab",
+    },
+    {
+      id: "file-search",
+      label: "File Search",
+      shortcut: "Ctrl + P",
+    },
+  ];
+
+  const handleCommandExecute = (
+    command: Command
+  ) => {
+    setIsCommandPaletteOpen(false);
+
+    switch (command.id) {
+      case "new-file":
+        handleCreateFile();
+        break;
+
+      case "save-file":
+        handleSave();
+        break;
+
+      case "rename-file":
+        if (activeFile) {
+          handleRenameFile(
+            activeFile
+          );
+        }
+        break;
+
+      case "delete-file":
+        if (activeFile) {
+          handleDeleteFile(
+            activeFile
+          );
+        }
+        break;
+
+      case "close-tab":
+        if (activeFile) {
+          const event = {
+            stopPropagation: () => {},
+          } as React.MouseEvent;
+
+          handleCloseTab(
+            event,
+            activeFile.path
+          );
+        }
+        break;
+
+      case "file-search":
+        setIsSearchOpen(true);
+        break;
+
+      default:
+        break;
     }
   };
 
@@ -444,6 +637,36 @@ function IDELayout() {
 
   return (
     <div className="ide">
+
+      {/* File Search */}
+
+      {isSearchOpen && (
+        <FileSearch
+          files={files}
+          onSelect={
+            handleSearchSelect
+          }
+          onClose={() =>
+            setIsSearchOpen(false)
+          }
+        />
+      )}
+
+      {/* Command Palette */}
+
+      {isCommandPaletteOpen && (
+        <CommandPalette
+          commands={commands}
+          onExecute={
+            handleCommandExecute
+          }
+          onClose={() =>
+            setIsCommandPaletteOpen(
+              false
+            )
+          }
+        />
+      )}
 
       {/* Top Bar */}
 
@@ -462,7 +685,6 @@ function IDELayout() {
         </div>
 
       </header>
-
 
       {/* Main Area */}
 
@@ -490,13 +712,11 @@ function IDELayout() {
 
           </div>
 
-
           {/* src folder */}
 
           <div className="folder">
             📁 src
           </div>
-
 
           {/* Files inside src */}
 
@@ -526,7 +746,8 @@ function IDELayout() {
                     )
                   }
                 >
-                  📄 {file.name}
+                  <FileIcon fileName={file.name} />{" "}
+{file.name}
                 </div>
 
                 <div className="file-actions">
@@ -559,7 +780,6 @@ function IDELayout() {
 
             ))}
 
-
           {/* Root files */}
 
           {files
@@ -589,7 +809,8 @@ function IDELayout() {
                     )
                   }
                 >
-                  📄 {file.name}
+                  <FileIcon fileName={file.name} />
+  {file.name}
                 </div>
 
                 <div className="file-actions">
@@ -623,7 +844,6 @@ function IDELayout() {
             ))}
 
         </aside>
-
 
         {/* Editor */}
 
@@ -672,9 +892,10 @@ function IDELayout() {
                     }
                   >
 
-                    <span>
-                      {file.name}
-                    </span>
+                    <span className="tab-name">
+  <FileIcon fileName={file.name} />
+  {file.name}
+</span>
 
                     {isModified && (
                       <span className="modified">
@@ -703,7 +924,6 @@ function IDELayout() {
             )}
 
           </div>
-
 
           {/* Monaco Editor */}
 
@@ -753,7 +973,6 @@ function IDELayout() {
         </main>
 
       </div>
-
 
       {/* Bottom Panel */}
 

@@ -1,4 +1,8 @@
-export type FileType = "typescript" | "json" | "markdown";
+export type FileType =
+  | "typescript"
+  | "typescriptreact"
+  | "json"
+  | "markdown";
 
 export interface IDEFile {
   name: string;
@@ -11,7 +15,7 @@ export const defaultFiles: IDEFile[] = [
   {
     name: "App.tsx",
     path: "src/App.tsx",
-    language: "typescript",
+    language: "typescriptreact",
     content: `function App() {
   return (
     <div>
@@ -23,10 +27,11 @@ export const defaultFiles: IDEFile[] = [
 export default App;
 `,
   },
+
   {
     name: "main.tsx",
     path: "src/main.tsx",
-    language: "typescript",
+    language: "typescriptreact",
     content: `import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
@@ -38,6 +43,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 );
 `,
   },
+
   {
     name: "package.json",
     path: "package.json",
@@ -49,6 +55,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 }
 `,
   },
+
   {
     name: "README.md",
     path: "README.md",
