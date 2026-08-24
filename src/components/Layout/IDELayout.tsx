@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
 
 import {
@@ -14,6 +14,8 @@ import CommandPalette, {
 
 import FileIcon from "../FileIcon/FileIcon";
 import socket from "../../services/socket";
+import { WORKSPACE_ID } from "../../config";
+import { getWorkspace } from "../../services/workspaceApi";
 
 function getLanguageFromFileName(
   fileName: string
@@ -71,7 +73,15 @@ function IDELayout() {
       file.path === activeFilePath
   );
 
-  const workspaceId = "demo-workspace";
+  const [onlineUsers, setOnlineUsers] =
+  useState<string[]>([]);
+
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const workspaceId = WORKSPACE_ID;
+
+  const [collaborators, setCollaborators] =
+  useState<string[]>([]);
 
   // -----------------------------
   // Save
@@ -173,90 +183,491 @@ useEffect(() => {
     );
   };
 
+  // -----------------------------
+  // Remote File Created
+  // -----------------------------
+
+  const handleRemoteFileCreated = (data: {
+    file: IDEFile;
+  }) => {
+    const file = data.file;
+
+    setFiles((current) => {
+      const alreadyExists = current.some(
+        (item) => item.path === file.path
+      );
+
+      if (alreadyExists) {
+        return current;
+      }
+
+      return [...current, file];
+    });
+
+    console.log(
+      "REMOTE FILE CREATED:",
+      file.path
+    );
+  };
+
+  // -----------------------------
+  // Remote File Renamed
+  // -----------------------------
+
+  const handleRemoteFileRenamed = (data: {
+    oldPath: string;
+    file: IDEFile;
+  }) => {
+    setFiles((current) =>
+      current.map((file) =>
+        file.path === data.oldPath
+          ? data.file
+          : file
+      )
+    );
+
+    setOpenFiles((current) =>
+      current.map((path) =>
+        path === data.oldPath
+          ? data.file.path
+          : path
+      )
+    );
+
+    setModifiedFiles((current) =>
+      current.map((path) =>
+        path === data.oldPath
+          ? data.file.path
+          : path
+      )
+    );
+
+    if (
+      activeFilePath === data.oldPath
+    ) {
+      setActiveFilePath(
+        data.file.path
+      );
+    }
+
+    console.log(
+      "REMOTE FILE RENAMED:",
+      data.oldPath,
+      "→",
+      data.file.path
+    );
+  };
+
+  // -----------------------------
+  // Remote File Deleted
+  // -----------------------------
+
+  const handleRemoteFileDeleted = (data: {
+    filePath: string;
+  }) => {
+    const filePath = data.filePath;
+
+    setFiles((current) =>
+      current.filter(
+        (file) => file.path !== filePath
+      )
+    );
+
+    setOpenFiles((current) =>
+      current.filter(
+        (path) => path !== filePath
+      )
+    );
+
+    setModifiedFiles((current) =>
+      current.filter(
+        (path) => path !== filePath
+      )
+    );
+
+    if (
+      activeFilePath === filePath
+    ) {
+      setActiveFilePath("");
+    }
+
+    console.log(
+      "REMOTE FILE DELETED:",
+      filePath
+    );
+  };
+
+  // -----------------------------
+  // User Joined
+  // -----------------------------
+
+  const handleUserJoined = (data: {
+  socketId: string;
+}) => {
+  setCollaborators((current) => {
+    if (current.includes(data.socketId)) {
+      return current;
+    }
+
+    return [
+      ...current,
+      data.socketId,
+    ];
+  });
+
+  console.log(
+    "USER JOINED WORKSPACE:",
+    data.socketId
+  );
+};
+
+  // -----------------------------
+  // User Left
+  // -----------------------------
+
+  const handleUserLeft = (data: {
+  socketId: string;
+}) => {
+  setCollaborators((current) =>
+    current.filter(
+      (id) => id !== data.socketId
+    )
+  );
+
+  console.log(
+    "USER LEFT WORKSPACE:",
+    data.socketId
+  );
+};
+
+  // -----------------------------
+  // Join Workspace
+  // -----------------------------
+
+  const joinWorkspace = () => {
+    console.log(
+      "SOCKET CONNECTED:",
+      socket.connected
+    );
+
+    console.log(
+      "JOINING WORKSPACE:",
+      workspaceId
+    );
+
+    socket.emit(
+      "join-workspace",
+      workspaceId
+    );
+  };
+
+  const handleWorkspaceUsers = (data: {
+  users: string[];
+}) => {
+  setOnlineUsers(data.users);
+
+  console.log(
+    "WORKSPACE USERS:",
+    data.users
+  );
+};
+
+  // -----------------------------
+  // Register listeners
+  // -----------------------------
+
   socket.on(
     "editor-change",
     handleRemoteChange
   );
+
+  socket.on(
+    "file-created",
+    handleRemoteFileCreated
+  );
+
+  socket.on(
+    "file-renamed",
+    handleRemoteFileRenamed
+  );
+
+  socket.on(
+    "file-deleted",
+    handleRemoteFileDeleted
+  );
+
+  socket.on(
+    "user-joined",
+    handleUserJoined
+  );
+
+  socket.on(
+    "user-left",
+    handleUserLeft
+  );
+
+  socket.on(
+  "workspace-users",
+  handleWorkspaceUsers
+);
+
+  // -----------------------------
+  // Connect
+  // -----------------------------
+
+  if (socket.connected) {
+    joinWorkspace();
+  } else {
+    socket.on(
+      "connect",
+      joinWorkspace
+    );
+  }
+
+  // -----------------------------
+  // Cleanup
+  // -----------------------------
 
   return () => {
     socket.off(
       "editor-change",
       handleRemoteChange
     );
+
+    socket.off(
+      "file-created",
+      handleRemoteFileCreated
+    );
+
+    socket.off(
+      "file-renamed",
+      handleRemoteFileRenamed
+    );
+
+    socket.off(
+      "file-deleted",
+      handleRemoteFileDeleted
+    );
+
+    socket.off(
+      "user-joined",
+      handleUserJoined
+    );
+
+    socket.off(
+      "user-left",
+      handleUserLeft
+    );
+
+    socket.off(
+      "connect",
+      joinWorkspace
+    );
+
+    socket.off(
+  "workspace-users",
+  handleWorkspaceUsers
+);
   };
-}, []);
+}, [workspaceId, activeFilePath]);
+
+
+
+useEffect(() => {
+  if (!socket.connected) {
+    socket.connect();
+  }
+
+  console.log("ABOUT TO JOIN:", workspaceId);
+console.log("SOCKET CONNECTED:", socket.connected);
+
+  socket.emit("join-workspace", workspaceId);
+
+  console.log(
+    "Joined workspace:",
+    workspaceId
+  );
+
+  return () => {
+    socket.off("workspace-joined");
+  };
+}, [workspaceId]);
+
+useEffect(() => {
+  async function loadWorkspace() {
+    try {
+      const data =
+        await getWorkspace(
+          workspaceId
+        );
+
+      if (data.files.length > 0) {
+        setFiles(data.files);
+      }
+
+      console.log(
+        "Workspace loaded:",
+        data.workspace.name
+      );
+
+      console.log(
+        "Files loaded:",
+        data.files
+      );
+    } catch (error) {
+      console.error(
+        "Failed to load workspace:",
+        error
+      );
+    }
+  }
+
+  loadWorkspace();
+}, [workspaceId]);
 
   // -----------------------------
   // Create file
   // -----------------------------
 
-  const handleCreateFile = () => {
-    const fileName = window.prompt(
-      "Enter file name:"
+ const handleCreateFile = async () => {
+  const fileName = window.prompt(
+    "Enter file name:"
+  );
+
+  if (!fileName) return;
+
+  const trimmedName = fileName.trim();
+
+  if (!trimmedName) return;
+
+  const newPath = `src/${trimmedName}`;
+
+  const alreadyExists = files.some(
+    (file) => file.path === newPath
+  );
+
+  if (alreadyExists) {
+    window.alert(
+      "A file with this name already exists."
+    );
+    return;
+  }
+
+  const newFile: IDEFile = {
+    name: trimmedName,
+    path: newPath,
+    language:
+      getLanguageFromFileName(trimmedName),
+    content: "",
+  };
+
+  try {
+    // Create file in PostgreSQL
+    const response = await fetch(
+      `http://localhost:3001/api/workspaces/${workspaceId}/files`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: newFile.name,
+          path: newFile.path,
+          language: newFile.language,
+          content: newFile.content,
+        }),
+      }
     );
 
-    if (!fileName) return;
+    if (!response.ok) {
+  throw new Error(
+    `Failed to create file: ${response.status}`
+  );
+}
 
-    const trimmedName =
-      fileName.trim();
+const data = await response.json();
 
-    if (!trimmedName) return;
+const createdFile: IDEFile = {
+  name: data.file.name,
+  path: data.file.path,
+  language: data.file.language,
+  content: data.file.content,
+};
 
-    const newPath =
-      `src/${trimmedName}`;
+socket.emit("file-created", {
+  workspaceId,
+  file: createdFile,
+});
 
-    const alreadyExists =
-      files.some(
-        (file) =>
-          file.path === newPath
-      );
-
-    if (alreadyExists) {
-      window.alert(
-        "A file with this name already exists."
-      );
-
-      return;
-    }
-
-    const newFile: IDEFile = {
-      name: trimmedName,
-      path: newPath,
-      language:
-        getLanguageFromFileName(
-          trimmedName
-        ),
-      content: "",
-    };
-
+    // Add to frontend only after database succeeds
     setFiles((current) => [
       ...current,
-      newFile,
+      createdFile,
     ]);
 
     setOpenFiles((current) => [
       ...current,
-      newFile.path,
+      createdFile.path,
     ]);
 
     setActiveFilePath(
+      createdFile.path
+    );
+
+    console.log(
+      "File created:",
       newFile.path
     );
-  };
+  } catch (error) {
+    console.error(
+      "Failed to create file:",
+      error
+    );
+
+    window.alert(
+      "Failed to create file."
+    );
+  }
+};
 
   // -----------------------------
   // Delete file
   // -----------------------------
 
-  const handleDeleteFile = (
-    file: IDEFile
-  ) => {
-    const confirmed =
-      window.confirm(
-        `Delete ${file.name}?`
-      );
+  const handleDeleteFile = async (
+  file: IDEFile
+) => {
+  const confirmed =
+    window.confirm(
+      `Delete ${file.name}?`
+    );
 
-    if (!confirmed) return;
+  if (!confirmed) return;
+
+  try {
+    const response = await fetch(
+      `http://localhost:3001/api/workspaces/${workspaceId}/files`,
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          filePath: file.path,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to delete file: ${response.status}`
+      );
+    }
+
+    socket.emit("file-deleted", {
+  workspaceId,
+  filePath: file.path,
+});
 
     const remainingFiles =
       files.filter(
@@ -282,88 +693,123 @@ useEffect(() => {
       )
     );
 
+    // If the deleted file was active,
+    // select another open file.
     if (
-      file.path === activeFilePath
+      activeFilePath === file.path
     ) {
       if (
         remainingOpenFiles.length > 0
       ) {
         setActiveFilePath(
-          remainingOpenFiles[0]
+          remainingOpenFiles[
+            remainingOpenFiles.length - 1
+          ]
         );
-      } else if (
-        remainingFiles.length > 0
-      ) {
-        setActiveFilePath(
-          remainingFiles[0].path
-        );
-
-        setOpenFiles([
-          remainingFiles[0].path,
-        ]);
       } else {
         setActiveFilePath("");
       }
     }
-  };
+
+    console.log(
+      "File deleted:",
+      file.path
+    );
+  } catch (error) {
+    console.error(
+      "Failed to delete file:",
+      error
+    );
+
+    window.alert(
+      "Failed to delete file."
+    );
+  }
+};
 
   // -----------------------------
   // Rename file
   // -----------------------------
 
-  const handleRenameFile = (
-    file: IDEFile
-  ) => {
-    const newName =
-      window.prompt(
-        "Enter new file name:",
-        file.name
+  const handleRenameFile = async (
+  file: IDEFile
+) => {
+  const newName = window.prompt(
+    "Enter new file name:",
+    file.name
+  );
+
+  if (!newName) return;
+
+  const trimmedName = newName.trim();
+
+  if (
+    !trimmedName ||
+    trimmedName === file.name
+  ) {
+    return;
+  }
+
+  const newPath = file.path.replace(
+    file.name,
+    trimmedName
+  );
+
+  const alreadyExists = files.some(
+    (item) =>
+      item.path === newPath
+  );
+
+  if (alreadyExists) {
+    window.alert(
+      "A file with this name already exists."
+    );
+    return;
+  }
+
+  const newLanguage =
+    getLanguageFromFileName(
+      trimmedName
+    );
+
+  try {
+    // Update PostgreSQL
+    const response = await fetch(
+      `http://localhost:3001/api/workspaces/${workspaceId}/files/rename`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          oldPath: file.path,
+          newName: trimmedName,
+          newPath,
+          language: newLanguage,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to rename file: ${response.status}`
       );
-
-    if (!newName) return;
-
-    const trimmedName =
-      newName.trim();
-
-    if (
-      !trimmedName ||
-      trimmedName === file.name
-    ) {
-      return;
     }
 
-    const newPath =
-      file.path.replace(
-        file.name,
-        trimmedName
-      );
+    const data = await response.json();
 
-    const alreadyExists =
-      files.some(
-        (item) =>
-          item.path === newPath
-      );
+    const renamedFile: IDEFile = {
+      name: data.file.name,
+      path: data.file.path,
+      language: data.file.language,
+      content: data.file.content,
+    };
 
-    if (alreadyExists) {
-      window.alert(
-        "A file with this name already exists."
-      );
-
-      return;
-    }
-
+    // Update local state
     setFiles((current) =>
       current.map((item) =>
         item.path === file.path
-          ? {
-              ...item,
-              name: trimmedName,
-              path: newPath,
-              language:
-                getLanguageFromFileName(
-                  trimmedName
-                ),
-            }
+          ? renamedFile
           : item
       )
     );
@@ -387,11 +833,31 @@ useEffect(() => {
     if (
       activeFilePath === file.path
     ) {
-      setActiveFilePath(
-        newPath
-      );
+      setActiveFilePath(newPath);
     }
-  };
+
+    // Tell other tabs
+    socket.emit("file-renamed", {
+      workspaceId,
+      oldPath: file.path,
+      file: renamedFile,
+    });
+
+    console.log(
+      "File renamed:",
+      newPath
+    );
+  } catch (error) {
+    console.error(
+      "Failed to rename file:",
+      error
+    );
+
+    window.alert(
+      "Failed to rename file."
+    );
+  }
+};
 
   // -----------------------------
   // Open file
@@ -502,7 +968,7 @@ useEffect(() => {
     return;
   }
 
-  // Update local file state
+  // Update local state immediately
   setFiles((currentFiles) =>
     currentFiles.map((file) =>
       file.path === activeFile.path
@@ -526,12 +992,55 @@ useEffect(() => {
     ]);
   }
 
-  // Send the change to other users
+  // Send change immediately to other tabs
   socket.emit("editor-change", {
     workspaceId,
     filePath: activeFile.path,
     content: value,
   });
+
+  // Cancel previous database save
+  if (saveTimeoutRef.current) {
+    clearTimeout(saveTimeoutRef.current);
+  }
+
+  // Save to PostgreSQL after 500ms of no typing
+  saveTimeoutRef.current = setTimeout(
+    async () => {
+      try {
+        const response = await fetch(
+          `http://localhost:3001/api/workspaces/${workspaceId}/files`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              filePath: activeFile.path,
+              content: value,
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to save file: ${response.status}`
+          );
+        }
+
+        console.log(
+          "File saved to PostgreSQL:",
+          activeFile.path
+        );
+      } catch (error) {
+        console.error(
+          "Failed to save file to PostgreSQL:",
+          error
+        );
+      }
+    },
+    500
+  );
 };
 
   // -----------------------------
@@ -699,6 +1208,20 @@ useEffect(() => {
             <div className="sidebar-title">
               EXPLORER
             </div>
+
+            <div
+  style={{
+    fontSize: "12px",
+    color: "#888",
+    marginTop: "4px",
+  }}
+>
+  {onlineUsers.length}{" "}
+  {onlineUsers.length === 1
+    ? "collaborator"
+    : "collaborators"}{" "}
+  online
+</div>
 
             <button
               className="new-file-button"
