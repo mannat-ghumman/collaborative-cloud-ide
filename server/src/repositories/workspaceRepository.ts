@@ -32,28 +32,63 @@ export async function createWorkspace(
   description: string | null,
   ownerId: string
 ): Promise<Workspace> {
-  const id = randomUUID();
+  const client = await pool.connect();
 
-  const result = await pool.query<Workspace>(
-    `
-    INSERT INTO workspaces (
-      id,
-      name,
-      description,
-      owner_id
-    )
-    VALUES ($1, $2, $3, $4)
-    RETURNING *
-    `,
-    [
-      id,
-      name,
-      description,
-      ownerId,
-    ]
-  );
+  try {
+    await client.query("BEGIN");
 
-  return result.rows[0];
+    const id = randomUUID();
+
+    // Create workspace
+    const workspaceResult =
+      await client.query<Workspace>(
+        `
+        INSERT INTO workspaces (
+          id,
+          name,
+          description,
+          owner_id
+        )
+        VALUES ($1, $2, $3, $4)
+        RETURNING *
+        `,
+        [
+          id,
+          name,
+          description,
+          ownerId,
+        ]
+      );
+
+    const workspace =
+      workspaceResult.rows[0];
+
+    // Add creator as workspace owner
+    await client.query(
+      `
+      INSERT INTO workspace_members (
+        workspace_id,
+        user_id,
+        role
+      )
+      VALUES ($1, $2, $3)
+      `,
+      [
+        id,
+        ownerId,
+        "owner",
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    return workspace;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 // -----------------------------------------

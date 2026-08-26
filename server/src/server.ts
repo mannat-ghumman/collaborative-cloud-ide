@@ -4,6 +4,12 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import pool from "./db";
 import workspaceRoutes from "./routes/workspaceRoutes";
+import authRoutes from "./routes/authRoutes";
+import {
+  authenticateToken,
+  AuthRequest,
+} from "./middleware/authMiddleware";
+import jwt from "jsonwebtoken";
 
 const app = express();
 
@@ -28,6 +34,11 @@ app.use(
   workspaceRoutes
 );
 
+app.use(
+  "/api/auth",
+  authRoutes
+);
+
 // -----------------------------
 // HTTP Routes
 // -----------------------------
@@ -38,9 +49,85 @@ app.get("/", (_req, res) => {
   });
 });
 
+app.get(
+  "/api/auth/me",
+  authenticateToken,
+  async (
+    req: AuthRequest,
+    res
+  ) => {
+    try {
+      const result =
+        await pool.query(
+          `
+          SELECT
+            id,
+            username,
+            email,
+            avatar_url
+          FROM users
+          WHERE id = $1
+          `,
+          [req.userId]
+        );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          message: "User not found",
+        });
+      }
+
+      return res.json({
+        user: result.rows[0],
+      });
+    } catch (error) {
+      console.error(error);
+
+      return res.status(500).json({
+        message: "Failed to get user",
+      });
+    }
+  }
+);
+
 // -----------------------------
 // Socket.IO
 // -----------------------------
+
+const JWT_SECRET =
+  process.env.JWT_SECRET ||
+  "cloudide-development-secret";
+
+io.use((socket, next) => {
+  const token =
+    socket.handshake.auth?.token;
+
+  if (!token) {
+    return next(
+      new Error("Authentication required")
+    );
+  }
+
+  try {
+    const decoded = jwt.verify(
+      token,
+      JWT_SECRET
+    ) as {
+      userId: string;
+    };
+
+    socket.data.userId =
+      decoded.userId;
+
+    next();
+  } catch (error) {
+    next(
+      new Error(
+        "Invalid or expired token"
+      )
+    );
+  }
+});
 
 io.on("connection", (socket) => {
   console.log(
@@ -52,51 +139,179 @@ io.on("connection", (socket) => {
   // Join Workspace
   // -----------------------------
 
-  socket.on(
-    "join-workspace",
-    (workspaceId: string) => {
+ socket.on(
+  "join-workspace",
+  async (workspaceId: string) => {
+    try {
+      const userId = socket.data.userId;
+
+      console.log("JOIN WORKSPACE REQUEST:", {
+        socketId: socket.id,
+        userId,
+        workspaceId,
+      });
+
+      if (!userId) {
+        socket.emit("workspace-error", {
+          message: "Authentication required",
+        });
+
+        return;
+      }
+
+      // -----------------------------------------
+      // Verify workspace membership
+      // -----------------------------------------
+
+      const memberResult =
+        await pool.query(
+          `
+          SELECT role
+          FROM workspace_members
+          WHERE workspace_id = $1
+            AND user_id = $2
+          `,
+          [workspaceId, userId]
+        );
+
+      if (memberResult.rows.length === 0) {
+        console.log(
+          "UNAUTHORIZED WORKSPACE ACCESS:",
+          {
+            userId,
+            workspaceId,
+          }
+        );
+
+        socket.emit("workspace-error", {
+          message:
+            "You are not a member of this workspace",
+        });
+
+        return;
+      }
+
+      // -----------------------------------------
+      // Leave previous workspace if necessary
+      // -----------------------------------------
+
+      if (
+        currentWorkspaceId &&
+        currentWorkspaceId !== workspaceId
+      ) {
+        socket.leave(
+          currentWorkspaceId
+        );
+
+        const previousRoom =
+          io.sockets.adapter.rooms.get(
+            currentWorkspaceId
+          );
+
+        io.to(
+          currentWorkspaceId
+        ).emit(
+          "workspace-users",
+          {
+            users: previousRoom
+              ? Array.from(previousRoom)
+              : [],
+          }
+        );
+      }
+
+      // -----------------------------------------
+      // Join new workspace
+      // -----------------------------------------
+
       currentWorkspaceId = workspaceId;
+
       socket.join(workspaceId);
 
-      const room = io.sockets.adapter.rooms.get(
-  workspaceId
-);
-
-const userCount = room
-  ? room.size
-  : 1;
-
-io.to(workspaceId).emit(
-  "workspace-users",
-  {
-    users: Array.from(room ?? []),
-  }
-);
-
       console.log(
-  "ROOMS:",
-  socket.rooms
-);
-
-      console.log(
-        `${socket.id} joined workspace ${workspaceId}`
+        "SOCKET JOINED ROOM:",
+        {
+          socketId: socket.id,
+          workspaceId,
+          rooms: Array.from(
+            socket.rooms
+          ),
+        }
       );
+
+      // -----------------------------------------
+      // Get current users AFTER joining
+      // -----------------------------------------
+
+      const room =
+        io.sockets.adapter.rooms.get(
+          workspaceId
+        );
+
+      const users = room
+        ? Array.from(room)
+        : [];
+
+      console.log(
+        "WORKSPACE USERS:",
+        {
+          workspaceId,
+          users,
+          count: users.length,
+        }
+      );
+
+      // -----------------------------------------
+      // Send complete user list to everyone
+      // -----------------------------------------
+
+      io.to(workspaceId).emit(
+        "workspace-users",
+        {
+          users,
+        }
+      );
+
+      // -----------------------------------------
+      // Tell joining socket it succeeded
+      // -----------------------------------------
 
       socket.emit(
         "workspace-joined",
         {
           workspaceId,
+          users,
         }
       );
 
-      socket.to(workspaceId).emit(
-        "user-joined",
+      // -----------------------------------------
+      // Tell existing collaborators
+      // -----------------------------------------
+
+      socket
+        .to(workspaceId)
+        .emit(
+          "user-joined",
+          {
+            socketId: socket.id,
+          }
+        );
+    } catch (error) {
+      console.error(
+        "Join workspace error:",
+        error
+      );
+
+      socket.emit(
+        "workspace-error",
         {
-          socketId: socket.id,
+          message:
+            "Failed to join workspace",
         }
       );
     }
-  );
+  }
+);
 
   // -----------------------------
   // Disconnect
@@ -137,19 +352,145 @@ io.to(workspaceId).emit(
 
 socket.on(
   "editor-change",
-  (data: {
+  async (data: {
     workspaceId: string;
     filePath: string;
     content: string;
   }) => {
+    try {
+      const userId = socket.data.userId;
 
-    socket.to(data.workspaceId).emit(
-      "editor-change",
-      {
-        filePath: data.filePath,
-        content: data.content,
+      if (!userId) {
+        socket.emit("workspace-error", {
+          message: "Authentication required",
+        });
+
+        return;
       }
-    );
+
+      // Verify that the user belongs to this workspace
+      const memberResult = await pool.query(
+        `
+        SELECT 1
+        FROM workspace_members
+        WHERE workspace_id = $1
+          AND user_id = $2
+        `,
+        [data.workspaceId, userId]
+      );
+
+      if (memberResult.rows.length === 0) {
+        socket.emit("workspace-error", {
+          message:
+            "You are not a member of this workspace",
+        });
+
+        return;
+      }
+
+      // Save the latest editor content to PostgreSQL
+      const updateResult = await pool.query(
+        `
+        UPDATE files
+        SET
+          content = $1,
+          version = version + 1,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE workspace_id = $2
+          AND path = $3
+        RETURNING version
+        `,
+        [
+          data.content,
+          data.workspaceId,
+          data.filePath,
+        ]
+      );
+
+      if (updateResult.rows.length === 0) {
+        socket.emit("workspace-error", {
+          message: "File not found",
+        });
+
+        return;
+      }
+
+      const version =
+        updateResult.rows[0].version;
+
+      console.log(
+        `File saved: ${data.filePath} (version ${version})`
+      );
+
+      // Send the change to the other collaborators
+      socket
+        .to(data.workspaceId)
+        .emit("editor-change", {
+          filePath: data.filePath,
+          content: data.content,
+          version,
+        });
+    } catch (error) {
+      console.error(
+        "Editor change error:",
+        error
+      );
+
+      socket.emit("workspace-error", {
+        message:
+          "Failed to save editor changes",
+      });
+    }
+  }
+);
+
+socket.on(
+  "cursor-move",
+  async (data: {
+    workspaceId: string;
+    filePath: string;
+    position: {
+      lineNumber: number;
+      column: number;
+    };
+  }) => {
+    try {
+      const userId = socket.data.userId;
+
+      if (!userId) {
+        return;
+      }
+
+      const memberResult =
+        await pool.query(
+          `
+          SELECT 1
+          FROM workspace_members
+          WHERE workspace_id = $1
+            AND user_id = $2
+          `,
+          [data.workspaceId, userId]
+        );
+
+      if (
+        memberResult.rows.length === 0
+      ) {
+        return;
+      }
+
+      socket
+        .to(data.workspaceId)
+        .emit("cursor-move", {
+          socketId: socket.id,
+          filePath: data.filePath,
+          position: data.position,
+        });
+    } catch (error) {
+      console.error(
+        "Cursor move error:",
+        error
+      );
+    }
   }
 );
 

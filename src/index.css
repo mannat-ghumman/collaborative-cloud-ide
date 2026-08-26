@@ -303,3 +303,7 @@ body {
 .tab-name svg {
   flex-shrink: 0;
 }
+
+.remote-cursor {
+  border-left: 2px solid #ff6b6b;
+}

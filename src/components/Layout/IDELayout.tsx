@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
+import type { OnMount } from "@monaco-editor/react";
+import type * as Monaco from "monaco-editor";
 
 import {
   defaultFiles,
@@ -14,7 +16,6 @@ import CommandPalette, {
 
 import FileIcon from "../FileIcon/FileIcon";
 import socket from "../../services/socket";
-import { WORKSPACE_ID } from "../../config";
 import { getWorkspace } from "../../services/workspaceApi";
 
 function getLanguageFromFileName(
@@ -45,7 +46,13 @@ function getLanguageFromFileName(
   }
 }
 
-function IDELayout() {
+interface IDELayoutProps {
+  workspaceId: string;
+}
+
+function IDELayout({
+  workspaceId,
+}: IDELayoutProps) {
   const [files, setFiles] =
     useState<IDEFile[]>(defaultFiles);
 
@@ -76,12 +83,25 @@ function IDELayout() {
   const [onlineUsers, setOnlineUsers] =
   useState<string[]>([]);
 
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+const saveTimeoutRef =
+  useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const workspaceId = WORKSPACE_ID;
+const editorRef =
+  useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
 
-  const [collaborators, setCollaborators] =
-  useState<string[]>([]);
+const monacoRef =
+  useRef<typeof Monaco | null>(null);
+
+const remoteDecorationsRef =
+  useRef<string[]>([]);
+
+const activeFilePathRef =
+  useRef(activeFilePath);
+
+useEffect(() => {
+  activeFilePathRef.current =
+    activeFilePath;
+}, [activeFilePath]);
 
   // -----------------------------
   // Save
@@ -162,6 +182,10 @@ function IDELayout() {
   }, [activeFile]);
 
 useEffect(() => {
+  // -----------------------------------------
+  // Remote Editor Change
+  // -----------------------------------------
+
   const handleRemoteChange = (data: {
     filePath: string;
     content: string;
@@ -183,9 +207,69 @@ useEffect(() => {
     );
   };
 
-  // -----------------------------
+  // -----------------------------------------
+  // Remote Cursor
+  // -----------------------------------------
+
+  const handleRemoteCursor = (data: {
+    socketId: string;
+    filePath: string;
+    position: {
+      lineNumber: number;
+      column: number;
+    };
+  }) => {
+    if (
+      !editorRef.current ||
+      !monacoRef.current
+    ) {
+      return;
+    }
+
+    if (
+      data.filePath !==
+      activeFilePathRef.current
+    ) {
+      return;
+    }
+
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+
+    const decoration =
+      editor.deltaDecorations(
+        remoteDecorationsRef.current,
+        [
+          {
+            range: new monaco.Range(
+              data.position.lineNumber,
+              data.position.column,
+              data.position.lineNumber,
+              data.position.column
+            ),
+
+            options: {
+              className:
+                "remote-cursor",
+
+              hoverMessage: {
+                value: `Collaborator ${data.socketId.slice(
+                  0,
+                  6
+                )}`,
+              },
+            },
+          },
+        ]
+      );
+
+    remoteDecorationsRef.current =
+      decoration;
+  };
+
+  // -----------------------------------------
   // Remote File Created
-  // -----------------------------
+  // -----------------------------------------
 
   const handleRemoteFileCreated = (data: {
     file: IDEFile;
@@ -193,9 +277,11 @@ useEffect(() => {
     const file = data.file;
 
     setFiles((current) => {
-      const alreadyExists = current.some(
-        (item) => item.path === file.path
-      );
+      const alreadyExists =
+        current.some(
+          (item) =>
+            item.path === file.path
+        );
 
       if (alreadyExists) {
         return current;
@@ -210,9 +296,9 @@ useEffect(() => {
     );
   };
 
-  // -----------------------------
+  // -----------------------------------------
   // Remote File Renamed
-  // -----------------------------
+  // -----------------------------------------
 
   const handleRemoteFileRenamed = (data: {
     oldPath: string;
@@ -243,7 +329,8 @@ useEffect(() => {
     );
 
     if (
-      activeFilePath === data.oldPath
+      activeFilePathRef.current ===
+      data.oldPath
     ) {
       setActiveFilePath(
         data.file.path
@@ -258,9 +345,9 @@ useEffect(() => {
     );
   };
 
-  // -----------------------------
+  // -----------------------------------------
   // Remote File Deleted
-  // -----------------------------
+  // -----------------------------------------
 
   const handleRemoteFileDeleted = (data: {
     filePath: string;
@@ -269,7 +356,8 @@ useEffect(() => {
 
     setFiles((current) =>
       current.filter(
-        (file) => file.path !== filePath
+        (file) =>
+          file.path !== filePath
       )
     );
 
@@ -286,7 +374,8 @@ useEffect(() => {
     );
 
     if (
-      activeFilePath === filePath
+      activeFilePathRef.current ===
+      filePath
     ) {
       setActiveFilePath("");
     }
@@ -297,88 +386,79 @@ useEffect(() => {
     );
   };
 
-  // -----------------------------
+  // -----------------------------------------
+  // Workspace Users
+  // -----------------------------------------
+
+  const handleWorkspaceUsers = (data: {
+    users: string[];
+  }) => {
+    console.log(
+      "WORKSPACE USERS:",
+      data.users
+    );
+
+    setOnlineUsers(data.users);
+  };
+
+  // -----------------------------------------
   // User Joined
-  // -----------------------------
+  // -----------------------------------------
 
   const handleUserJoined = (data: {
-  socketId: string;
-}) => {
-  setCollaborators((current) => {
-    if (current.includes(data.socketId)) {
-      return current;
-    }
+    socketId: string;
+  }) => {
+    console.log(
+      "USER JOINED WORKSPACE:",
+      data.socketId
+    );
 
-    return [
-      ...current,
-      data.socketId,
-    ];
-  });
+    setOnlineUsers((current) => {
+      if (
+        current.includes(data.socketId)
+      ) {
+        return current;
+      }
 
-  console.log(
-    "USER JOINED WORKSPACE:",
-    data.socketId
-  );
-};
+      return [
+        ...current,
+        data.socketId,
+      ];
+    });
+  };
 
-  // -----------------------------
+  // -----------------------------------------
   // User Left
-  // -----------------------------
+  // -----------------------------------------
 
   const handleUserLeft = (data: {
-  socketId: string;
-}) => {
-  setCollaborators((current) =>
-    current.filter(
-      (id) => id !== data.socketId
-    )
-  );
-
-  console.log(
-    "USER LEFT WORKSPACE:",
-    data.socketId
-  );
-};
-
-  // -----------------------------
-  // Join Workspace
-  // -----------------------------
-
-  const joinWorkspace = () => {
+    socketId: string;
+  }) => {
     console.log(
-      "SOCKET CONNECTED:",
-      socket.connected
+      "USER LEFT WORKSPACE:",
+      data.socketId
     );
 
-    console.log(
-      "JOINING WORKSPACE:",
-      workspaceId
-    );
-
-    socket.emit(
-      "join-workspace",
-      workspaceId
+    setOnlineUsers((current) =>
+      current.filter(
+        (id) =>
+          id !== data.socketId
+      )
     );
   };
 
-  const handleWorkspaceUsers = (data: {
-  users: string[];
-}) => {
-  setOnlineUsers(data.users);
-
-  console.log(
-    "WORKSPACE USERS:",
-    data.users
-  );
-};
-
-  // -----------------------------
+  // -----------------------------------------
   // Register listeners
-  // -----------------------------
+  // -----------------------------------------
 
   socket.on(
     "editor-change",
     handleRemoteChange
+  );
+
+  socket.on(
+    "cursor-move",
+    handleRemoteCursor
   );
 
   socket.on(
@@ -397,6 +477,11 @@ useEffect(() => {
   );
 
   socket.on(
+    "workspace-users",
+    handleWorkspaceUsers
+  );
+
+  socket.on(
     "user-joined",
     handleUserJoined
   );
@@ -406,32 +491,49 @@ useEffect(() => {
     handleUserLeft
   );
 
-  socket.on(
-  "workspace-users",
-  handleWorkspaceUsers
-);
+  // -----------------------------------------
+  // Connect + Join Workspace
+  // -----------------------------------------
 
-  // -----------------------------
-  // Connect
-  // -----------------------------
+  const joinWorkspace = () => {
+    console.log(
+      "SOCKET CONNECTED:",
+      socket.id
+    );
+
+    console.log(
+      "JOINING WORKSPACE:",
+      workspaceId
+    );
+
+    socket.emit(
+      "join-workspace",
+      workspaceId
+    );
+  };
 
   if (socket.connected) {
     joinWorkspace();
   } else {
-    socket.on(
+    socket.once(
       "connect",
       joinWorkspace
     );
   }
 
-  // -----------------------------
+  // -----------------------------------------
   // Cleanup
-  // -----------------------------
+  // -----------------------------------------
 
   return () => {
     socket.off(
       "editor-change",
       handleRemoteChange
+    );
+
+    socket.off(
+      "cursor-move",
+      handleRemoteCursor
     );
 
     socket.off(
@@ -450,6 +552,11 @@ useEffect(() => {
     );
 
     socket.off(
+      "workspace-users",
+      handleWorkspaceUsers
+    );
+
+    socket.off(
       "user-joined",
       handleUserJoined
     );
@@ -463,35 +570,12 @@ useEffect(() => {
       "connect",
       joinWorkspace
     );
-
-    socket.off(
-  "workspace-users",
-  handleWorkspaceUsers
-);
-  };
-}, [workspaceId, activeFilePath]);
-
-
-
-useEffect(() => {
-  if (!socket.connected) {
-    socket.connect();
-  }
-
-  console.log("ABOUT TO JOIN:", workspaceId);
-console.log("SOCKET CONNECTED:", socket.connected);
-
-  socket.emit("join-workspace", workspaceId);
-
-  console.log(
-    "Joined workspace:",
-    workspaceId
-  );
-
-  return () => {
-    socket.off("workspace-joined");
   };
 }, [workspaceId]);
+
+
+
+
 
 useEffect(() => {
   async function loadWorkspace() {
@@ -954,6 +1038,40 @@ socket.emit("file-created", {
     }
   };
 
+
+  const handleEditorMount: OnMount = (
+  editor,
+  monaco
+) => {
+  editorRef.current = editor;
+  monacoRef.current = monaco;
+
+  editor.onDidChangeCursorPosition(
+    (event) => {
+      const currentPath =
+        activeFilePathRef.current;
+
+      if (!currentPath) {
+        return;
+      }
+
+      socket.emit(
+        "cursor-move",
+        {
+          workspaceId,
+          filePath: currentPath,
+          position: {
+            lineNumber:
+              event.position.lineNumber,
+            column:
+              event.position.column,
+          },
+        }
+      );
+    }
+  );
+};
+
   // -----------------------------
   // Editor changes
   // -----------------------------
@@ -998,6 +1116,8 @@ socket.emit("file-created", {
     filePath: activeFile.path,
     content: value,
   });
+
+  
 
   // Cancel previous database save
   if (saveTimeoutRef.current) {
@@ -1462,6 +1582,7 @@ socket.emit("file-created", {
                   activeFile.content
                 }
                 theme="vs-dark"
+                onMount={handleEditorMount}
                 onChange={
                   handleEditorChange
                 }

@@ -19,13 +19,21 @@ interface WorkspaceResponse {
 export async function getWorkspace(
   workspaceId: string
 ): Promise<WorkspaceResponse> {
+  const token =
+  localStorage.getItem("cloudide_token");
+
   const response = await fetch(
-    `${API_URL}/workspaces/${workspaceId}`
+    `${API_URL}/workspaces/${workspaceId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
   );
 
   if (!response.ok) {
     throw new Error(
-      "Failed to load workspace"
+      `Failed to load workspace: ${response.status}`
     );
   }
 
