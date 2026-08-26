@@ -6,9 +6,11 @@ import pool from "../db";
 
 const router = Router();
 
-const JWT_SECRET =
-  process.env.JWT_SECRET ||
-  "cloudide-development-secret";
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  throw new Error("JWT_SECRET is not configured");
+}
 
 // -----------------------------------------
 // Register

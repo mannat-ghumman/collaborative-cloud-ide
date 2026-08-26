@@ -94,9 +94,11 @@ app.get(
 // Socket.IO
 // -----------------------------
 
-const JWT_SECRET =
-  process.env.JWT_SECRET ||
-  "cloudide-development-secret";
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  throw new Error("JWT_SECRET is not configured");
+}
 
 io.use((socket, next) => {
   const token =
