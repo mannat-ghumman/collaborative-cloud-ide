@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { createServer } from "http";
@@ -10,6 +11,7 @@ import {
   AuthRequest,
 } from "./middleware/authMiddleware";
 import jwt from "jsonwebtoken";
+
 
 const app = express();
 
